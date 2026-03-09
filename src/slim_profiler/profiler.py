@@ -12,6 +12,8 @@ from collections import defaultdict
 
 import psutil
 
+import slim_profiler
+
 try:
     import pynvml
 except ImportError:
@@ -40,6 +42,8 @@ class GlobalConstants:
     total_mem: float
     total_gpu_mem: float
     num_cores: int
+    nvidia_driver_version: str
+    nvidia_cuda_max_supported: str
 
     def __init__(self):
         self.gpu_names = []
@@ -50,13 +54,20 @@ class GlobalConstants:
         _lh.info("Total memory: %.2f MiB", self.total_mem / (1 << 20))
         if pynvml is None:
             self.num_gpus = 0
-            self.total_gpu_mem = 0.0
+            self.total_gpu_mem = 0
+            self.nvidia_driver_version = "N/A"
+            self.nvidia_cuda_max_supported = ""
         else:
-            self.total_gpu_mem = 0.0
+            self.total_gpu_mem = 0
             try:
                 pynvml.nvmlInit()
-                driver_version = pynvml.nvmlSystemGetDriverVersion()
-                _lh.info("NVML Driver Version: %s", driver_version)
+                self.nvidia_driver_version = pynvml.nvmlSystemGetDriverVersion()
+                cuda_version_raw = pynvml.nvmlSystemGetCudaDriverVersion()
+                cuda_major = cuda_version_raw // 1000
+                cuda_minor = (cuda_version_raw % 1000) // 10
+                self.nvidia_cuda_max_supported = f"{cuda_major}.{cuda_minor}"
+                _lh.info("NVML Driver Version: %s supporting CUDA: %s", self.nvidia_driver_version, self.nvidia_cuda_max_supported)
+
                 self.num_gpus = pynvml.nvmlDeviceGetCount()
                 for i in range(self.num_gpus):
                     handle = pynvml.nvmlDeviceGetHandleByIndex(i)
@@ -153,9 +164,9 @@ class ProcessLocalData:
         self.gpu_vmem_d = []
         self.gpu_util_d = []
         self.cpu_time_cache = {}
-        self.max_rss_cache = 0.0
+        self.max_rss_cache = 0
         self.wallclock_start = time.time_ns()
-        self.max_gpu_mem_cache = 0.0
+        self.max_gpu_mem_cache = 0
 
 
 class Serializer:
@@ -179,6 +190,14 @@ class Serializer:
                     ],
                     "cpus": self._global_constants.num_cores,
                     "mem": self._global_constants.total_mem,
+                    "software":{
+                        "python": sys.version,
+                        "psutil": psutil.__version__,
+                        "slim_profiler": slim_profiler.__version__,
+                        "pynvml": "PRESENT" if pynvml is not None else "N/A",
+                        "nvidia_driver": self._global_constants.nvidia_driver_version,
+                        "nvidia_cuda_max_supported": self._global_constants.nvidia_cuda_max_supported,
+                    }
                 },
                 w,
                 indent=4,
@@ -210,8 +229,8 @@ class Serializer:
         self.close()
 
     def serialize(self, timestamp: float, pld: ProcessLocalData):
-        joint_cpu = 0
-        joint_mem = 0.0
+        joint_cpu = 0.0
+        joint_mem = 0
         for k in pld.scpids:
             joint_cpu += pld.cpu_json_d[k]
             joint_mem += pld.mem_json_d[k]
@@ -239,6 +258,7 @@ class Serializer:
                 (
                     str(timestamp),
                     str(joint_mem),
+                    str(joint_cpu),
                         *itertools.chain(
                             *zip(
                                 [str(sum(pld.gpu_vmem_d[i].values())) for i in range(self._global_constants.num_gpus)],
