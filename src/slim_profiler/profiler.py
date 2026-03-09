@@ -1,6 +1,7 @@
 import argparse
 import dataclasses
 import itertools
+import json
 import logging
 import os
 import signal
@@ -34,15 +35,19 @@ __all__ = ["SlimProfiler", "GlobalConstants"]
 
 class GlobalConstants:
     num_gpus: int
+    gpu_names = []
+    gpu_mems = []
     total_mem: float
     total_gpu_mem: float
     num_cores: int
 
     def __init__(self):
+        self.gpu_names = []
+        self.gpu_mems = []
         self.num_cores = psutil.cpu_count(logical=True)
         _lh.info("Num cores: %d", self.num_cores)
-        self.total_mem = psutil.virtual_memory().total / (1 << 20)
-        _lh.info("Total memory: %.2f MiB", self.total_mem)
+        self.total_mem = psutil.virtual_memory().total
+        _lh.info("Total memory: %.2f MiB", self.total_mem / (1 << 20))
         if pynvml is None:
             self.num_gpus = 0
             self.total_gpu_mem = 0.0
@@ -55,7 +60,10 @@ class GlobalConstants:
                 self.num_gpus = pynvml.nvmlDeviceGetCount()
                 for i in range(self.num_gpus):
                     handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-                    this_gpu_mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total / (1 << 20)
+                    this_gpu_mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
+                    this_gpu_name = pynvml.nvmlDeviceGetName(handle)
+                    self.gpu_names.append(this_gpu_name)
+                    self.gpu_mems.append(this_gpu_mem)
                     _lh.info("Found GPU %d: %s MEM %.2f MiB", i, pynvml.nvmlDeviceGetName(handle), this_gpu_mem)
                     self.total_gpu_mem += this_gpu_mem
 
@@ -63,7 +71,7 @@ class GlobalConstants:
             except pynvml.NVMLError:
                 self.num_gpus = 0
         _lh.info("Found %d GPUs", self.num_gpus)
-        _lh.info("Total GPU memory: %.2f MiB", self.total_gpu_mem)
+        _lh.info("Total GPU memory: %.2f MiB", self.total_gpu_mem / (1 << 20))
 
 
 def get_gpu_vmem_utilization(
@@ -76,8 +84,6 @@ def get_gpu_vmem_utilization(
     # Only utilization samples that were recorded after this timestamp will be returned.
     # The CPU timestamp, i.e. absolute Unix epoch timestamp (in microseconds), is used.
     # Here we use the timestamp 1 second ago to ensure the record buffer is not empty.
-    timestamp_ms = time.time_ns() // 1000 - 1000_000
-
     try:
         pynvml.nvmlInit()
         for i in range(global_constants.num_gpus):
@@ -114,7 +120,7 @@ def get_gpu_vmem_utilization(
                     if process.usedGpuMemory is None:
                         vmem[str(process.pid)] = 0
                     else:
-                        vmem[str(process.pid)] = process.usedGpuMemory / (1 << 20)
+                        vmem[str(process.pid)] = process.usedGpuMemory
 
             retl.append((vmem, utilization))
         pynvml.nvmlShutdown()
@@ -161,15 +167,30 @@ class Serializer:
         self._perproc_plot_appender = open(self._dst_tsv + ".perproc_plot.tsv", "w", encoding="UTF-8")
         self._joint_plot_appender = open(self._dst_tsv + ".joint_plot.tsv", "w", encoding="UTF-8")
         self._global_constants = global_constants
-
-        perproc_table_header = ["TIME", "PID", "MEM_RSS_MiB", "CPU_UTIL_PCT"]
+        with open(f"{dst_tsv}.gc.json", "w", encoding="UTF-8") as w:
+            json.dump(
+                {
+                    "gpus":[
+                        {
+                            "name": self._global_constants.gpu_names[i],
+                            "mem": self._global_constants.gpu_mems[i],
+                        }
+                        for i in range(self._global_constants.num_gpus)
+                    ],
+                    "cpus": self._global_constants.num_cores,
+                    "mem": self._global_constants.total_mem,
+                },
+                w,
+                indent=4,
+            )
+        perproc_table_header = ["TIME", "PID", "MEM_RSS", "CPU_UTIL_PCT"]
         for i in range(global_constants.num_gpus):
-            perproc_table_header.append(f"GPU{i}_VMEM_MiB")
+            perproc_table_header.append(f"GPU{i}_VMEM")
             perproc_table_header.append(f"GPU{i}_UTIL_PCT")
 
-        joint_table_header = ["TIME", "MEM_RSS_MiB", "CPU_UTIL_PCT"]
+        joint_table_header = ["TIME", "MEM_RSS", "CPU_UTIL_PCT"]
         for i in range(global_constants.num_gpus):
-            joint_table_header.append(f"GPU{i}_VMEM_MiB")
+            joint_table_header.append(f"GPU{i}_VMEM")
             joint_table_header.append(f"GPU{i}_UTIL_PCT")
 
         self._perproc_plot_appender.write("\t".join(perproc_table_header))
@@ -313,7 +334,7 @@ class SlimProfiler(threading.Thread):
                 except ZeroDivisionError:
                     self._pld.cpu_json_d[scpid] = -1
                 current_rss = child.memory_info().rss
-                self._pld.mem_json_d[scpid] = current_rss / (1 << 20)
+                self._pld.mem_json_d[scpid] = current_rss
                 self._pld.scpids.append(scpid)
             except PSUTIL_NOTFOUND_ERRORS as e:
                 _lh.error("Process %d not found: %s", child.pid, e)
@@ -334,13 +355,13 @@ class SlimProfiler(threading.Thread):
 
         _lh.info(
             "Process group peak RSS: %d MiB (%.2f%%)",
-            self._pld.max_rss_cache,
+            self._pld.max_rss_cache / (1 << 20),
             self._pld.max_rss_cache / self._global_constants.total_mem * 100,
         )
         if  self._global_constants.total_gpu_mem > 0:
             _lh.info(
                 "Process group peak GPU Mem: %d MiB (%.2f%%)",
-                self._pld.max_gpu_mem_cache,
+                self._pld.max_gpu_mem_cache / (1 << 20),
                 self._pld.max_gpu_mem_cache / self._global_constants.total_gpu_mem * 100,
             )
         _lh.info(

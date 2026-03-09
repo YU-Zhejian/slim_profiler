@@ -8,3 +8,4 @@ dist
 .vscode/
 __pycache__
 *.py[cd]
+*.json

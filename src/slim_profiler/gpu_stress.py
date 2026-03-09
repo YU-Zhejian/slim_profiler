@@ -69,7 +69,7 @@ def gpu_stress_test(device_id:int, duration: int):
     torch.cuda.empty_cache()
 
 
-if __name__ == "__main__":
+def main():
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", type=int, default=0, help="GPU ID")
@@ -86,3 +86,6 @@ if __name__ == "__main__":
     gpu_stress_test(args.device, args.time)
     if args.with_profiler:
         p.terminate()
+
+if __name__ == "__main__":
+    main()
