@@ -1,0 +1,49 @@
+[build-system]
+requires = [
+    "setuptools",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "yuzj_slim_profiler"
+description = "A Slim version for https://github.com/WanluLiuLab/labw_proc_profiler, capable of tracing NVidia multi-GPU workloads"
+authors = [
+    { name = "YU Zhejian", email = "yuzj25@seas.upenn.edu" }
+]
+license = "GPL-3.0-or-later"
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Topic :: Utilities"
+]
+requires-python = ">=3.11"
+dynamic = ["version", "readme", "dependencies", "optional-dependencies"]
+
+[project.urls]
+Source = "https://github.com/YU-Zhejian/slim_profiler"
+
+[project.scripts]
+yuzj-slim-profiler = "slim_profiler.profiler:main"
+yuzj-slim-profiler-gpustress = "slim_profiler.gpu_stress:main"
+
+[tool.setuptools]
+license-files = ["License.md"]
+
+[tool.setuptools.dynamic]
+version = { attr = "slim_profiler.__version__" }
+readme = { file = "Readme.md" , content-type = "text/markdown"}
+dependencies = { file = "requirements.txt" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

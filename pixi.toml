@@ -1,0 +1,28 @@
+[workspace]
+authors = ["YU Zhejian <yuzj25@seas.upenn.edu>"]
+channels = ["conda-forge"]
+name = "slim_profiler"
+platforms = ["linux-64"]
+version = "0.1.0"
+
+[tasks]
+
+[environments]
+gpu-stress = { features = ["gpu-stress"] }
+build = { features = ["build"] }
+
+[dependencies]
+python = "3.12.*"
+psutil = ">=7.2.2,<8"
+
+[feature.gpu-stress]
+system-requirements = { cuda = "12.0" }
+
+[feature.gpu-stress.dependencies]
+nvidia-ml-py = "==13.590.48"
+cuda-version = "12.6.*"
+pytorch-gpu = "*"
+
+[feature.build.dependencies]
+python-build = "*"
+twine = "*"

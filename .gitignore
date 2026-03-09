@@ -1,0 +1,10 @@
+# pixi environments
+.pixi/*
+!.pixi/config.toml
+*.tsv
+dist
+*.egg-info
+.idea/
+.vscode/
+__pycache__
+*.py[cd]
