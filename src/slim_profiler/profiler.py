@@ -104,7 +104,10 @@ def get_gpu_vmem_utilization(
                     if sample.pid in pids:
                         utilization[str(sample.pid)] = sample.smUtil
             except pynvml.NVMLError as e:
-                _lh.error("nvmlDeviceGetProcessUtilization ERR: %s", e)
+                if str(e) == "Not Found":
+                    pass # No idea why this emerge
+                else:
+                    _lh.error("nvmlDeviceGetProcessUtilization ERR: %s", e)
 
             for process in processes:
                 if process.pid in pids:
