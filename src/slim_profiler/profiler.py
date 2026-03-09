@@ -353,21 +353,31 @@ class SlimProfiler(threading.Thread):
         self._should_stop = True
 
 
-if __name__ == "__main__":
+def main():
     # Initialize the logger, setting filter to INFO
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
     parser = argparse.ArgumentParser(description="SlimProfiler")
     parser.add_argument("--trace-pid", type=int, required=False, help="PID to trace", default=os.getppid())
     parser.add_argument("--report_global_constants", action="store_true", help="Report global constants and exit")
-    parser.add_argument("--dst-tsv", type=str, required=False, help="Destination TSV file")
+    parser.add_argument("--dst-tsv", type=str, required=False, help="Prefix of the destination TSV files")
     parser.add_argument("--interval", type=float, default=1.0, help="Interval in seconds")
     args = parser.parse_args()
     gc = GlobalConstants()
     if args.report_global_constants:
         sys.exit(0)
+    if args.trace_pid is None:
+        _lh.error("Specify the PID!")
+        sys.exit(1)
+    if args.dst_tsv is None:
+        _lh.error("Specify the prefix to destination TSV!")
+        sys.exit(1)
+
     sp = SlimProfiler(gc, args.trace_pid, args.dst_tsv, args.interval)
     # Register SIGTERM handler to sp.terminate()
     signal.signal(signal.SIGTERM, lambda _: sp.terminate())
     signal.signal(signal.SIGINT, lambda _: sp.terminate())
-    sp.run()
+    sp.run() # Use start in other scenarios.
+
+if __name__ == "__main__":
+    main()
