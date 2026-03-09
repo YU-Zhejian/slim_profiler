@@ -334,11 +334,12 @@ class SlimProfiler(threading.Thread):
             self._pld.max_rss_cache,
             self._pld.max_rss_cache / self._global_constants.total_mem * 100,
         )
-        _lh.info(
-            "Process group peak GPU Mem: %d MiB (%.2f%%)",
-            self._pld.max_gpu_mem_cache,
-            self._pld.max_gpu_mem_cache / self._global_constants.total_gpu_mem * 100,
-        )
+        if  self._global_constants.total_gpu_mem > 0:
+            _lh.info(
+                "Process group peak GPU Mem: %d MiB (%.2f%%)",
+                self._pld.max_gpu_mem_cache,
+                self._pld.max_gpu_mem_cache / self._global_constants.total_gpu_mem * 100,
+            )
         _lh.info(
             "Process group mean CPU Utilization: %.2f%%",
             sum(x[1] for x in self._pld.cpu_time_cache.values())
