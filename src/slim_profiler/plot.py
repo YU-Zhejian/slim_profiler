@@ -95,6 +95,30 @@ def plot_main(gc_json:str, joint_plot_tsv: str, plot_prefix: str) -> None:
     plt.savefig(f"{plot_prefix}.gpu_memory_usage.png")
     plt.clf()
 
+    # Plot all GPU utilization in one plot.
+    plt.figure(figsize=(12, 6))
+    fig, axs = plt.subplots(num_gpus, 1, figsize=(12, 6 * num_gpus), sharex=True)
+    if num_gpus == 1:
+        axs = [axs]
+    for i in range(num_gpus):
+        gpu_id = i
+        gpu_util_col = f"GPU{gpu_id}_UTIL_PCT"
+        axs[i].plot(df["TIME"], df[gpu_util_col], label=f"GPU {gpu_id} Utilization (%)")
+        mean_gpu_util = df[gpu_util_col].mean()
+        if mean_gpu_util > 0.5 * 100:
+                axs[i].axhline(100, color="red", linestyle="--", label="Total GPU Utilization")
+                axs[i].set_ylim(0, 120)
+        else:
+                axs[i].set_ylim(0, df[gpu_util_col].max() * 1.2)
+        axs[i].set_ylabel("GPU Utilization (%)")
+        axs[i].legend()
+        axs[i].grid()
+    axs[-1].set_xlabel("Time (UTC)")
+    plt.suptitle("GPU Utilization Over Time")
+    plt.tight_layout()
+    plt.savefig(f"{plot_prefix}.gpu_utilization.png")
+    plt.clf()
+
 def main():
     logging.basicConfig(level="INFO")
     parser = argparse.ArgumentParser()
