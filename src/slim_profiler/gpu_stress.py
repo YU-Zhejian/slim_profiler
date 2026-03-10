@@ -7,7 +7,7 @@ import argparse
 import sys
 
 
-def gpu_stress_test(device_id:int, duration: int):
+def gpu_stress_test(device_id: int, duration: int):
     if not torch.cuda.is_available():
         raise ValueError("Error: CUDA not detected.")
 
@@ -79,6 +79,7 @@ def main():
     p = None
     if args.with_profiler:
         import slim_profiler.profiler as profiler
+
         gc = profiler.GlobalConstants()
         p = profiler.SlimProfiler(gc, os.getpid(), "profiler", 0.1)
         p.start()
@@ -86,6 +87,7 @@ def main():
     gpu_stress_test(args.device, args.time)
     if args.with_profiler:
         p.terminate()
+
 
 if __name__ == "__main__":
     main()

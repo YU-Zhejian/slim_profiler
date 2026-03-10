@@ -66,7 +66,11 @@ class GlobalConstants:
                 cuda_major = cuda_version_raw // 1000
                 cuda_minor = (cuda_version_raw % 1000) // 10
                 self.nvidia_cuda_max_supported = f"{cuda_major}.{cuda_minor}"
-                _lh.info("NVML Driver Version: %s supporting CUDA: %s", self.nvidia_driver_version, self.nvidia_cuda_max_supported)
+                _lh.info(
+                    "NVML Driver Version: %s supporting CUDA: %s",
+                    self.nvidia_driver_version,
+                    self.nvidia_cuda_max_supported,
+                )
 
                 self.num_gpus = pynvml.nvmlDeviceGetCount()
                 for i in range(self.num_gpus):
@@ -105,7 +109,7 @@ def get_gpu_vmem_utilization(
             except pynvml.NVMLError as e:
                 _lh.error("get_gpu_vmem_utilization ERR: %s", e)
                 continue
-            if  hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses"):
+            if hasattr(pynvml, "nvmlDeviceGetComputeRunningProcesses"):
                 try:
                     processes = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
                 except pynvml.NVMLError as e:
@@ -122,7 +126,7 @@ def get_gpu_vmem_utilization(
                         utilization[str(sample.pid)] = sample.smUtil
             except pynvml.NVMLError as e:
                 if str(e) == "Not Found":
-                    pass # No idea why this emerge
+                    pass  # No idea why this emerge
                 else:
                     _lh.error("nvmlDeviceGetProcessUtilization ERR: %s", e)
 
@@ -181,7 +185,7 @@ class Serializer:
         with open(f"{dst_tsv}.gc.json", "w", encoding="UTF-8") as w:
             json.dump(
                 {
-                    "gpus":[
+                    "gpus": [
                         {
                             "name": self._global_constants.gpu_names[i],
                             "mem": self._global_constants.gpu_mems[i],
@@ -190,14 +194,14 @@ class Serializer:
                     ],
                     "cpus": self._global_constants.num_cores,
                     "mem": self._global_constants.total_mem,
-                    "software":{
+                    "software": {
                         "python": sys.version,
                         "psutil": psutil.__version__,
                         "slim_profiler": slim_profiler.__version__,
                         "pynvml": "PRESENT" if pynvml is not None else "N/A",
                         "nvidia_driver": self._global_constants.nvidia_driver_version,
                         "nvidia_cuda_max_supported": self._global_constants.nvidia_cuda_max_supported,
-                    }
+                    },
                 },
                 w,
                 indent=4,
@@ -259,12 +263,12 @@ class Serializer:
                     str(timestamp),
                     str(joint_mem),
                     str(joint_cpu),
-                        *itertools.chain(
-                            *zip(
-                                [str(sum(pld.gpu_vmem_d[i].values())) for i in range(self._global_constants.num_gpus)],
-                                [str(sum(pld.gpu_util_d[i].values())) for i in range(self._global_constants.num_gpus)],
-                            ),
+                    *itertools.chain(
+                        *zip(
+                            [str(sum(pld.gpu_vmem_d[i].values())) for i in range(self._global_constants.num_gpus)],
+                            [str(sum(pld.gpu_util_d[i].values())) for i in range(self._global_constants.num_gpus)],
                         ),
+                    ),
                 )
             )
         )
@@ -378,7 +382,7 @@ class SlimProfiler(threading.Thread):
             self._pld.max_rss_cache / (1 << 20),
             self._pld.max_rss_cache / self._global_constants.total_mem * 100,
         )
-        if  self._global_constants.total_gpu_mem > 0:
+        if self._global_constants.total_gpu_mem > 0:
             _lh.info(
                 "Process group peak GPU Mem: %d MiB (%.2f%%)",
                 self._pld.max_gpu_mem_cache / (1 << 20),
@@ -422,7 +426,8 @@ def main():
     # Register SIGTERM handler to sp.terminate()
     signal.signal(signal.SIGTERM, lambda _: sp.terminate())
     signal.signal(signal.SIGINT, lambda _: sp.terminate())
-    sp.run() # Use start in other scenarios.
+    sp.run()  # Use start in other scenarios.
+
 
 if __name__ == "__main__":
     main()

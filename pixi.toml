@@ -10,6 +10,7 @@ version = "0.1.0"
 [environments]
 gpu-stress = { features = ["gpu-stress"] }
 build = { features = ["build"] }
+fmt = { features = ["fmt"] , no-default-feature = true }
 
 [dependencies]
 python = "3.12.*"
@@ -29,3 +30,7 @@ pytorch-gpu = "*"
 [feature.build.dependencies]
 python-build = "*"
 twine = "*"
+
+[feature.fmt.dependencies]
+black = "*"
+

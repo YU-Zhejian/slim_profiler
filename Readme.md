@@ -4,6 +4,10 @@
 
 ## News
 
+### `0.1.2` 2026-03-10
+
+- Fixed issue #5.
+
 ### `0.1.1` 2026-03-10
 
 - Added plotting functionality to visualize the results.
