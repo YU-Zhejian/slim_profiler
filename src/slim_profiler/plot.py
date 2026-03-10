@@ -93,11 +93,10 @@ def plot_main(
         return
 
     # Plot all GPU memory usage in one plot.
-    fig, axs = plt.subplots(num_gpus, 1, figsize=(base_fig_width, base_fig_height * len(gpu_id_in_use)), sharex=True)
+    fig, axs = plt.subplots(len(gpu_id_in_use), 1, figsize=(base_fig_width, base_fig_height * len(gpu_id_in_use)), sharex=True)
     if len(gpu_id_in_use) == 1:
         axs = [axs]
-    for i in gpu_id_in_use:
-        gpu_id = i
+    for i, gpu_id in enumerate(gpu_id_in_use):
         gpu_mem_col = f"GPU{gpu_id}_VMEM"
         axs[i].plot(df["TIME"], df[gpu_mem_col], label=f"GPU {gpu_id} Memory Used")
         mean_gpu_mem = df[gpu_mem_col].mean()
@@ -117,10 +116,10 @@ def plot_main(
     plt.close()
 
     # Plot all GPU utilization in one plot.
-    fig, axs = plt.subplots(num_gpus, 1, figsize=(base_fig_width, base_fig_height * num_gpus), sharex=True)
-    if num_gpus == 1:
+    fig, axs = plt.subplots(len(gpu_id_in_use), 1, figsize=(base_fig_width, base_fig_height * len(gpu_id_in_use)), sharex=True)
+    if len(gpu_id_in_use) == 1:
         axs = [axs]
-    for i in range(num_gpus):
+    for i, gpu_id in enumerate(gpu_id_in_use):
         gpu_id = i
         gpu_util_col = f"GPU{gpu_id}_UTIL_PCT"
         axs[i].plot(df["TIME"], df[gpu_util_col], label=f"GPU {gpu_id} Utilization (%)")
