@@ -4,6 +4,10 @@
 
 ## News
 
+### `0.1.4` 2026-03-10
+
+- Fixed unreported error.
+
 ### `0.1.3` 2026-03-10
 
 - Fixed issue #6.

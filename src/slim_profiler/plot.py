@@ -100,9 +100,10 @@ def plot_main(
         gpu_mem_col = f"GPU{gpu_id}_VMEM"
         axs[i].plot(df["TIME"], df[gpu_mem_col], label=f"GPU {gpu_id} Memory Used")
         mean_gpu_mem = df[gpu_mem_col].mean()
-        if mean_gpu_mem > 0.5 * gc_data["gpus"][i]["mem"]:
-            axs[i].axhline(gc_data["gpus"][i]["mem"], color="red", linestyle="--", label="Total GPU Memory")
-            axs[i].set_ylim(0, gc_data["gpus"][i]["mem"] * 1.2)
+        total_gpu_mem = gc_data["gpus"][gpu_id]["mem"]
+        if mean_gpu_mem > 0.5 * total_gpu_mem:
+            axs[i].axhline(total_gpu_mem, color="red", linestyle="--", label="Total GPU Memory")
+            axs[i].set_ylim(0, total_gpu_mem * 1.2)
         else:
             axs[i].set_ylim(0, df[gpu_mem_col].max() * 1.2)
         axs[i].set_ylabel("Memory")
@@ -120,7 +121,6 @@ def plot_main(
     if len(gpu_id_in_use) == 1:
         axs = [axs]
     for i, gpu_id in enumerate(gpu_id_in_use):
-        gpu_id = i
         gpu_util_col = f"GPU{gpu_id}_UTIL_PCT"
         axs[i].plot(df["TIME"], df[gpu_util_col], label=f"GPU {gpu_id} Utilization (%)")
         mean_gpu_util = df[gpu_util_col].mean()
