@@ -367,6 +367,20 @@ class SlimProfiler(threading.Thread):
                 self.terminate()
                 break
 
+    def max_rss(self):
+        return self._pld.max_rss_cache 
+
+    def max_gpu_mem(self):
+        return self._pld.max_gpu_mem_cache 
+
+    def mean_cpu_ulti(self):
+        return (
+        sum(x[1] for x in self._pld.cpu_time_cache.values())
+            / (time.time_ns() - self._pld.wallclock_start)
+            * 1e9
+        )
+
+
     def run(self):
         _lh.info("started with PID=%d", self._trace_pid)
         serializer = Serializer(self._global_constants, self._dst_tsv)
