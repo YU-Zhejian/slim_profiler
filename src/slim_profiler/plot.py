@@ -13,7 +13,7 @@ import slim_profiler
 import pandas as pd
 import matplotlib.pyplot as plt
 
-_lh = logging.getLogger(__name__)
+_lh = logging.getLogger("SlimProfiler::Plot")
 
 
 def format_si(x, pos):
@@ -144,7 +144,8 @@ def plot_main(
 
 
 def main():
-    logging.basicConfig(level="INFO", format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(level="INFO", format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    _lh.info("Version %s. Using matplotlib %s", slim_profiler.__version__, matplotlib.__version__)
     parser = argparse.ArgumentParser()
     parser.add_argument("--dst-tsv", type=str, required=True, help="The --dst-tsv you used in data collection")
     args = parser.parse_args()

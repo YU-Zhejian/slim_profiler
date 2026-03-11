@@ -418,7 +418,8 @@ class SlimProfiler(threading.Thread):
 
 def main():
     # Initialize the logger, setting filter to INFO
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    _lh.info("Version %s.", slim_profiler.__version__)
 
     parser = argparse.ArgumentParser(description="SlimProfiler")
     parser.add_argument("--trace-pid", type=int, required=False, help="PID to trace", default=os.getppid())

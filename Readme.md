@@ -4,6 +4,14 @@
 
 ## News
 
+### `0.1.6` 2026-03-11
+
+- Changed matplotlib backend to `Agg` to prevent Tk from messing the benchmarks.
+
+### `0.1.5` 2026-03-10
+
+- Added `max_rss`, `max_gpu_mem`, and `mean_cpu_ulti` methods for callers to get maximum resource consumption at the end.
+
 ### `0.1.4` 2026-03-10
 
 - Fixed unreported error.
