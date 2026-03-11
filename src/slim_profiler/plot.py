@@ -2,6 +2,10 @@ import json
 import logging
 import argparse
 
+import matplotlib
+
+matplotlib.use('Agg')
+
 from matplotlib.ticker import FuncFormatter
 
 import slim_profiler
@@ -140,7 +144,7 @@ def plot_main(
 
 
 def main():
-    logging.basicConfig(level="INFO")
+    logging.basicConfig(level="INFO", format="%(asctime)s [%(levelname)s] %(message)s")
     parser = argparse.ArgumentParser()
     parser.add_argument("--dst-tsv", type=str, required=True, help="The --dst-tsv you used in data collection")
     args = parser.parse_args()
