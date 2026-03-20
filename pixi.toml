@@ -1,9 +1,8 @@
+# Some names were specified in pyproject.toml.
 [workspace]
-authors = ["YU Zhejian <yuzj25@seas.upenn.edu>"]
 channels = ["conda-forge"]
 name = "slim_profiler"
 platforms = ["linux-64"]
-version = "0.1.0"
 
 [tasks]
 
@@ -33,4 +32,3 @@ twine = "*"
 
 [feature.fmt.dependencies]
 black = "*"
-
