@@ -91,7 +91,7 @@ class GlobalConstants:
 
 def get_gpu_vmem_utilization(
     global_constants: GlobalConstants, pids: Set[int]
-) -> List[Tuple[Mapping[str, Any], Mapping[str, Any]]]:
+) -> List[Tuple[Mapping[str, int], Mapping[str, int]]]:
     if pynvml is None:
         return []
     retl = []
@@ -147,30 +147,40 @@ def get_gpu_vmem_utilization(
 
 @dataclasses.dataclass
 class ProcessLocalData:
-    mem_json_d: Dict[str, float]
+    rss_json_d: Dict[str, float]
+    """pid_str -> memory in bytes"""
+
     cpu_json_d: Dict[str, float]
-    scpids: List[str]
+    """pid_str -> cpu ultilization in seconds"""
+
+    cpid_strs: List[str]
     """Process IDs as strings"""
 
-    gpu_vmem_d: List[Mapping[str, Any]]
-    gpu_util_d: List[Mapping[str, Any]]
+    gpu_vmem_d: List[Mapping[str, int]]
+    gpu_util_d: List[Mapping[str, int]]
 
     cpu_time_cache: Dict[int, Tuple[int, float]]
     """ # Process -> [Last time point, Total CPU Time]"""
+
     max_rss_cache: float
-    wallclock_start: int
+
+    wallclock_start_ns: int
+
     max_gpu_mem_cache: float
 
+    max_cpu_util_cache: float
+
     def __init__(self):
-        self.mem_json_d = {}
+        self.rss_json_d = {}
         self.cpu_json_d = {}
-        self.scpids = []
+        self.cpid_strs = []
         self.gpu_vmem_d = []
         self.gpu_util_d = []
         self.cpu_time_cache = {}
         self.max_rss_cache = 0
-        self.wallclock_start = time.time_ns()
+        self.wallclock_start_ns = time.time_ns()
         self.max_gpu_mem_cache = 0
+        self.max_cpu_util_cache = 0.0
 
 
 class Serializer:
@@ -232,23 +242,23 @@ class Serializer:
     def __exit__(self, *_args):
         self.close()
 
-    def serialize(self, timestamp: float, pld: ProcessLocalData):
+    def serialize(self, timestamp_s: float, pld: ProcessLocalData):
         joint_cpu = 0.0
         joint_mem = 0
-        for k in pld.scpids:
-            joint_cpu += pld.cpu_json_d[k]
-            joint_mem += pld.mem_json_d[k]
+        for current_pid_str in pld.cpid_strs:
+            joint_cpu += pld.cpu_json_d[current_pid_str]
+            joint_mem += pld.rss_json_d[current_pid_str]
             self._perproc_plot_appender.write(
                 "\t".join(
                     (
-                        str(timestamp),
-                        str(k),
-                        str(pld.mem_json_d[k]),
-                        str(pld.cpu_json_d[k]),
+                        str(timestamp_s),
+                        current_pid_str,
+                        str(pld.rss_json_d[current_pid_str]),
+                        str(pld.cpu_json_d[current_pid_str]),
                         *itertools.chain(
                             *zip(
-                                [str(pld.gpu_vmem_d[i][str(k)]) for i in range(self._global_constants.num_gpus)],
-                                [str(pld.gpu_util_d[i][str(k)]) for i in range(self._global_constants.num_gpus)],
+                                [str(pld.gpu_vmem_d[gpu_id][current_pid_str]) for gpu_id in range(self._global_constants.num_gpus)],
+                                [str(pld.gpu_util_d[gpu_id][current_pid_str]) for gpu_id in range(self._global_constants.num_gpus)],
                             ),
                         ),
                     )
@@ -260,25 +270,20 @@ class Serializer:
         self._joint_plot_appender.write(
             "\t".join(
                 (
-                    str(timestamp),
+                    str(timestamp_s),
                     str(joint_mem),
                     str(joint_cpu),
                     *itertools.chain(
                         *zip(
-                            [str(sum(pld.gpu_vmem_d[i].values())) for i in range(self._global_constants.num_gpus)],
-                            [str(sum(pld.gpu_util_d[i].values())) for i in range(self._global_constants.num_gpus)],
+                            [str(sum(pld.gpu_vmem_d[gpu_id].values())) for gpu_id in range(self._global_constants.num_gpus)],
+                            [str(sum(pld.gpu_util_d[gpu_if].values())) for gpu_if in range(self._global_constants.num_gpus)],
                         ),
                     ),
                 )
             )
         )
-        joint_gpu_mem = sum(sum(pld.gpu_vmem_d[i].values()) for i in range(self._global_constants.num_gpus))
         self._joint_plot_appender.write("\n")
         self._joint_plot_appender.flush()
-        if joint_mem > pld.max_rss_cache:
-            pld.max_rss_cache = joint_mem
-        if joint_gpu_mem > pld.max_gpu_mem_cache:
-            pld.max_gpu_mem_cache = joint_gpu_mem
 
 
 class SlimProfiler(threading.Thread):
@@ -305,7 +310,7 @@ class SlimProfiler(threading.Thread):
         self._max_rss_cache = 0
 
     def _init(self):
-        self._pld.wallclock_start = time.time_ns()
+        self._pld.wallclock_start_ns = time.time_ns()
         self._pld.cpu_time_cache = {}
         try:
             children = list(self._p.children(recursive=True))
@@ -337,35 +342,39 @@ class SlimProfiler(threading.Thread):
         for device_gpu_vmem_d, device_gpu_util_d in vu:
             self._pld.gpu_vmem_d.append(device_gpu_vmem_d)
             self._pld.gpu_util_d.append(device_gpu_util_d)
-        self._pld.scpids = []
+        self._pld.cpid_strs = []
         for child in children:
             try:
                 cpid = child.pid
-                scpid = str(cpid)
+                cpid_str = str(cpid)
                 current_cpu_times = child.cpu_times()
-                current_time = time.time_ns()
-                current_cpu_time = current_cpu_times.user + current_cpu_times.system
-                last_cpu_time_cache = self._pld.cpu_time_cache.get(child.pid, (current_time, 0))
-                self._pld.cpu_time_cache[child.pid] = (current_time, current_cpu_time)
+                current_time_ns = time.time_ns()
+                current_cpu_time_ns = (current_cpu_times.user + current_cpu_times.system) * 1e9
+                last_cpu_time_cache = self._pld.cpu_time_cache.get(child.pid, (current_time_ns, 0))
+                self._pld.cpu_time_cache[child.pid] = (current_time_ns, current_cpu_time_ns)
                 try:
                     cpu_pct = (
-                        (current_cpu_time - last_cpu_time_cache[1])
-                        / (current_time - last_cpu_time_cache[0])
-                        * 1e9
+                        (current_cpu_time_ns - last_cpu_time_cache[1])
+                        / (current_time_ns - last_cpu_time_cache[0])
                         * 100
                     )
-                    self._pld.cpu_json_d[scpid] = cpu_pct
+                    self._pld.cpu_json_d[cpid_str] = cpu_pct
                 except ZeroDivisionError:
-                    self._pld.cpu_json_d[scpid] = -1
+                    self._pld.cpu_json_d[cpid_str] = 0
                 current_rss = child.memory_info().rss
-                self._pld.mem_json_d[scpid] = current_rss
-                self._pld.scpids.append(scpid)
+                self._pld.rss_json_d[cpid_str] = current_rss
+                self._pld.cpid_strs.append(cpid_str)
             except PSUTIL_NOTFOUND_ERRORS as e:
                 _lh.error("Process %d not found: %s", child.pid, e)
                 continue
             except RuntimeError:
                 self.terminate()
                 break
+        self._pld.max_cpu_util_cache = max(self._pld.max_cpu_util_cache, sum(self._pld.cpu_json_d.values()))
+        self._pld.max_gpu_mem_cache = max(self._pld.max_gpu_mem_cache, sum(
+            sum(self._pld.gpu_vmem_d[gpu_id].values()) for gpu_id in range(self._global_constants.num_gpus)
+        ))
+        self._pld.max_rss_cache = max(self._pld.max_rss_cache, sum(self._pld.rss_json_d.values()))
 
     def max_rss(self):
         return self._pld.max_rss_cache 
@@ -376,7 +385,7 @@ class SlimProfiler(threading.Thread):
     def mean_cpu_ulti(self):
         return (
         sum(x[1] for x in self._pld.cpu_time_cache.values())
-            / (time.time_ns() - self._pld.wallclock_start)
+            / (time.time_ns() - self._pld.wallclock_start_ns)
             * 1e9
         )
 
@@ -405,7 +414,7 @@ class SlimProfiler(threading.Thread):
         _lh.info(
             "Process group mean CPU Utilization: %.2f%%",
             sum(x[1] for x in self._pld.cpu_time_cache.values())
-            / (time.time_ns() - self._pld.wallclock_start)
+            / (time.time_ns() - self._pld.wallclock_start_ns)
             * 1e9
             * 100,
         )
@@ -438,9 +447,9 @@ def main():
         sys.exit(1)
 
     sp = SlimProfiler(gc, args.trace_pid, args.dst_tsv, args.interval)
-    # Register SIGTERM handler to sp.terminate()
     signal.signal(signal.SIGTERM, lambda _: sp.terminate())
     signal.signal(signal.SIGINT, lambda _: sp.terminate())
+    signal.signal(signal.SIGHUP, lambda _: sp.terminate())
     sp.run()  # Use start in other scenarios.
 
 

@@ -28,7 +28,19 @@ classifiers = [
     "Topic :: Utilities"
 ]
 requires-python = ">=3.11"
-dynamic = ["version", "readme", "dependencies", "optional-dependencies"]
+dynamic = ["version", "readme"]
+dependencies = [
+    "psutil"
+]
+[project.optional-dependencies]
+plot = [
+    "matplotlib",
+    "pandas"
+]
+gpu = ["pynvml"]
+gpu_stress = [
+    "torch"
+]
 
 [project.urls]
 Source = "https://github.com/YU-Zhejian/slim_profiler"
@@ -43,7 +55,6 @@ license-files = ["License.md"]
 [tool.setuptools.dynamic]
 version = { attr = "slim_profiler.__version__" }
 readme = { file = "Readme.md" , content-type = "text/markdown"}
-dependencies = { file = "requirements.txt" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
