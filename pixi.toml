@@ -1,9 +1,8 @@
+# Some names were specified in pyproject.toml.
 [workspace]
-authors = ["YU Zhejian <yuzj25@seas.upenn.edu>"]
 channels = ["conda-forge"]
 name = "slim_profiler"
 platforms = ["linux-64"]
-version = "0.1.0"
 
 [tasks]
 
@@ -13,24 +12,23 @@ build = { features = ["build"] }
 fmt = { features = ["fmt"] , no-default-feature = true }
 
 [dependencies]
-python = "3.12.*"
+python = "3.10.*"
 psutil = ">=7.2.2,<8"
-pandas = ">=3.0.1,<4"
-numpy = ">=2.4.2,<3"
-matplotlib-base = ">=3.10.8,<4"
+pandas = ">=2.3.3,<3"
+numpy = ">=2.2.6,<3"
+matplotlib-base = ">=3.10.9,<4"
 
 [feature.gpu-stress]
 system-requirements = { cuda = "12.0" }
 
 [feature.gpu-stress.dependencies]
-nvidia-ml-py = "==13.590.48"
-cuda-version = "12.6.*"
-pytorch-gpu = "*"
+nvidia-ml-py = ">=13.595.45,<14"
+cuda-version = ">=12.9,<13"
+pytorch-gpu = ">=2.10.0,<3"
 
 [feature.build.dependencies]
-python-build = "*"
-twine = "*"
+python-build = ">=1.5.0,<2"
+twine = ">=6.2.0,<7"
 
 [feature.fmt.dependencies]
-black = "*"
-
+black = ">=26.5.1,<27"

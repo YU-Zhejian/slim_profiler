@@ -17,7 +17,7 @@ git ls-files |
                     true
                 else
                     black \
-                        --line-length 120 --target-version py311 --quiet "${line}" &>/dev/null
+                        --line-length 120 --target-version py310 --quiet "${line}" &>/dev/null
                 fi
             } &
         fi

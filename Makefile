@@ -7,7 +7,7 @@ fmt:
 
 .PHONY: twine
 twine:
-	python -m twine upload --config-file .pypirc dist/*
+	pixi run -e build --frozen python -m twine upload --config-file .pypirc dist/*
 
 .PNONY: build
 build:

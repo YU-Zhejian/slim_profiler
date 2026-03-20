@@ -10,3 +10,4 @@ __pycache__
 *.py[cd]
 *.json
 *.png
+.pypirc

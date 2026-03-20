@@ -19,7 +19,7 @@ try:
 except ImportError:
     pynvml = None
 
-from typing import Mapping, Any, List, Dict, Tuple, Set
+from typing import Mapping, List, Dict, Tuple, Set
 
 PSUTIL_NOTFOUND_ERRORS = (
     psutil.NoSuchProcess,
