@@ -40,7 +40,7 @@ plot = [
 ]
 gpu = ["pynvml"]
 gpu_stress = [
-    "torch"
+    "cupy"
 ]
 
 [project.urls]

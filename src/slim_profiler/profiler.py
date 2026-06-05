@@ -22,12 +22,8 @@ except ImportError:
 from typing import Mapping, List, Dict, Tuple, Set
 
 PSUTIL_NOTFOUND_ERRORS = (
-    psutil.NoSuchProcess,
-    psutil.ZombieProcess,
-    psutil.AccessDenied,
     psutil.Error,
     OSError,
-    IOError,
 )
 DEV_NULL = "nul" if sys.platform == "win32" else "/dev/null"
 
@@ -59,6 +55,8 @@ class GlobalConstants:
             self.nvidia_cuda_max_supported = ""
         else:
             self.total_gpu_mem = 0
+            self.nvidia_driver_version = "N/A"
+            self.nvidia_cuda_max_supported = ""
             try:
                 pynvml.nvmlInit()
                 self.nvidia_driver_version = pynvml.nvmlSystemGetDriverVersion()
@@ -95,12 +93,7 @@ def get_gpu_vmem_utilization(
     if pynvml is None:
         return []
     retl = []
-    # From nvitop:
-    # Only utilization samples that were recorded after this timestamp will be returned.
-    # The CPU timestamp, i.e. absolute Unix epoch timestamp (in microseconds), is used.
-    # Here we use the timestamp 1 second ago to ensure the record buffer is not empty.
     try:
-        pynvml.nvmlInit()
         for i in range(global_constants.num_gpus):
             vmem = defaultdict(lambda: 0)
             utilization = defaultdict(lambda: 0)
@@ -125,8 +118,8 @@ def get_gpu_vmem_utilization(
                     if sample.pid in pids:
                         utilization[str(sample.pid)] = sample.smUtil
             except pynvml.NVMLError as e:
-                if str(e) == "Not Found":
-                    pass  # No idea why this emerge
+                if e.value == pynvml.NVML_ERROR_NOT_FOUND:
+                    pass
                 else:
                     _lh.error("nvmlDeviceGetProcessUtilization ERR: %s", e)
 
@@ -138,9 +131,8 @@ def get_gpu_vmem_utilization(
                         vmem[str(process.pid)] = process.usedGpuMemory
 
             retl.append((vmem, utilization))
-        pynvml.nvmlShutdown()
     except pynvml.NVMLError as e:
-        retl = [(defaultdict(lambda: 0), defaultdict(lambda: 0))] * global_constants.num_gpus
+        retl = [(defaultdict(lambda: 0), defaultdict(lambda: 0)) for _ in range(global_constants.num_gpus)]
         _lh.error("get_gpu_vmem_utilization ERR: %s", e)
     return retl
 
@@ -276,7 +268,7 @@ class Serializer:
                     *itertools.chain(
                         *zip(
                             [str(sum(pld.gpu_vmem_d[gpu_id].values())) for gpu_id in range(self._global_constants.num_gpus)],
-                            [str(sum(pld.gpu_util_d[gpu_if].values())) for gpu_if in range(self._global_constants.num_gpus)],
+                            [str(sum(pld.gpu_util_d[gpu_id].values())) for gpu_id in range(self._global_constants.num_gpus)],
                         ),
                     ),
                 )
@@ -307,7 +299,6 @@ class SlimProfiler(threading.Thread):
             self.terminate()
         self._dst_tsv = dst_tsv
         self._interval = interval
-        self._max_rss_cache = 0
 
     def _init(self):
         self._pld.wallclock_start_ns = time.time_ns()
@@ -319,9 +310,9 @@ class SlimProfiler(threading.Thread):
             self.terminate()
             return
         for child in children:
-            current_time = time.time_ns()
+            current_time_ns = time.time_ns()
             current_cpu_times = child.cpu_times()
-            self._pld.cpu_time_cache[child.pid] = (current_time, current_cpu_times.user + current_cpu_times.system)
+            self._pld.cpu_time_cache[child.pid] = (current_time_ns, (current_cpu_times.user + current_cpu_times.system) * 1e9)
 
     def _collect(self):
         try:
@@ -376,29 +367,42 @@ class SlimProfiler(threading.Thread):
         ))
         self._pld.max_rss_cache = max(self._pld.max_rss_cache, sum(self._pld.rss_json_d.values()))
 
+        current_pid_strs = set(self._pld.cpid_strs)
+        current_int_pids = {int(s) for s in current_pid_strs}
+        for pid in [p for p in self._pld.cpu_time_cache if p not in current_int_pids]:
+            del self._pld.cpu_time_cache[pid]
+        for pid_str in [s for s in self._pld.cpu_json_d if s not in current_pid_strs]:
+            del self._pld.cpu_json_d[pid_str]
+            del self._pld.rss_json_d[pid_str]
+
     def max_rss(self):
         return self._pld.max_rss_cache 
 
     def max_gpu_mem(self):
         return self._pld.max_gpu_mem_cache 
 
-    def mean_cpu_ulti(self):
+    def mean_cpu_util(self):
         return (
-        sum(x[1] for x in self._pld.cpu_time_cache.values())
+            sum(x[1] for x in self._pld.cpu_time_cache.values())
             / (time.time_ns() - self._pld.wallclock_start_ns)
-            * 1e9
         )
 
 
     def run(self):
         _lh.info("started with PID=%d", self._trace_pid)
-        serializer = Serializer(self._global_constants, self._dst_tsv)
-        self._init()
-        while not self._should_stop:
-            timestamp = time.time()
-            self._collect()
-            serializer.serialize(timestamp, self._pld)
-            time.sleep(self._interval)
+        if pynvml is not None and self._global_constants.num_gpus > 0:
+            pynvml.nvmlInit()
+        try:
+            with Serializer(self._global_constants, self._dst_tsv) as serializer:
+                self._init()
+                while not self._should_stop:
+                    timestamp = time.time()
+                    self._collect()
+                    serializer.serialize(timestamp, self._pld)
+                    time.sleep(self._interval)
+        finally:
+            if pynvml is not None and self._global_constants.num_gpus > 0:
+                pynvml.nvmlShutdown()
 
         _lh.info(
             "Process group peak RSS: %d MiB (%.2f%%)",
@@ -415,7 +419,6 @@ class SlimProfiler(threading.Thread):
             "Process group mean CPU Utilization: %.2f%%",
             sum(x[1] for x in self._pld.cpu_time_cache.values())
             / (time.time_ns() - self._pld.wallclock_start_ns)
-            * 1e9
             * 100,
         )
         _lh.info("Finished")
@@ -447,9 +450,9 @@ def main():
         sys.exit(1)
 
     sp = SlimProfiler(gc, args.trace_pid, args.dst_tsv, args.interval)
-    signal.signal(signal.SIGTERM, lambda _: sp.terminate())
-    signal.signal(signal.SIGINT, lambda _: sp.terminate())
-    signal.signal(signal.SIGHUP, lambda _: sp.terminate())
+    signal.signal(signal.SIGTERM, lambda _x, _y: sp.terminate())
+    signal.signal(signal.SIGINT, lambda _x, _y: sp.terminate())
+    signal.signal(signal.SIGHUP, lambda _x, _y: sp.terminate())
     sp.run()  # Use start in other scenarios.
 
 

@@ -1,72 +1,76 @@
 import logging
 import os
-
-import torch
 import time
 import argparse
 import sys
 
+import cupy as cp
+
 
 def gpu_stress_test(device_id: int, duration: int):
-    if not torch.cuda.is_available():
+    try:
+        num_devices = cp.cuda.runtime.getDeviceCount()
+    except cp.cuda.runtime.CUDARuntimeError:
         raise ValueError("Error: CUDA not detected.")
 
-    if device_id >= torch.cuda.device_count():
+    if num_devices == 0:
+        raise ValueError("Error: CUDA not detected.")
+
+    if device_id >= num_devices:
         raise ValueError(f"Error: GPU index {device_id} not found.")
 
-    device = torch.device(f"cuda:{device_id}")
-    print(f"--- Target: {torch.cuda.get_device_name(device_id)} (ID: {device_id}) ---")
+    with cp.cuda.Device(device_id):
+        props = cp.cuda.runtime.getDeviceProperties(device_id)
+        name = props["name"]
+        if isinstance(name, bytes):
+            name = name.decode()
+        print(f"--- Target: {name} (ID: {device_id}) ---")
 
-    # 1. Allocation (~5GB)
-    # 1.25 billion float32 elements * 4 bytes = 5GB
-    print("Allocating ~5GB VRAM...")
-    dummy_memory = torch.zeros((1250000000,), device=device)
+        # 1. Allocation (~5GB)
+        # 1.25 billion float32 elements * 4 bytes = 5GB
+        print("Allocating ~5GB VRAM...")
+        dummy_memory = cp.zeros(1_250_000_000, dtype=cp.float32)
 
-    # 2. Setup Calculation (4096 x 4096 matrix)
-    N = 4096
-    matrix_a = torch.randn((N, N), device=device)
-    matrix_b = torch.randn((N, N), device=device)
+        # 2. Setup Calculation (4096 x 4096 matrix)
+        N = 4096
+        matrix_a = cp.random.randn(N, N).astype(cp.float32)
+        matrix_b = cp.random.randn(N, N).astype(cp.float32)
 
-    # Operations per matmul: 2 * N^3
-    ops_per_matmul = 2 * (N**3)
+        ops_per_matmul = 2 * (N**3)
 
-    print(f"Starting stress test for {duration}s...")
+        print(f"Starting stress test for {duration}s...")
 
-    # Synchronization ensures the GPU is ready before the timer starts
-    torch.cuda.synchronize(device)
-    start_time = time.time()
-    iterations = 0
+        cp.cuda.Device(device_id).synchronize()
+        start_time = time.time()
+        iterations = 0
 
-    try:
-        while time.time() - start_time < duration:
-            # Core calculation
-            torch.matmul(matrix_a, matrix_b)
-            iterations += 1
+        try:
+            while time.time() - start_time < duration:
+                cp.matmul(matrix_a, matrix_b)
+                iterations += 1
 
-        # Wait for the final operations to finish before stopping the clock
-        torch.cuda.synchronize(device)
-        end_time = time.time()
+            cp.cuda.Device(device_id).synchronize()
+            end_time = time.time()
 
-    except KeyboardInterrupt:
-        torch.cuda.synchronize(device)
-        end_time = time.time()
-        print("\nInterrupted.")
+        except KeyboardInterrupt:
+            cp.cuda.Device(device_id).synchronize()
+            end_time = time.time()
+            print("\nInterrupted.")
 
-    # 3. Calculate Performance
-    total_time = end_time - start_time
-    total_ops = iterations * ops_per_matmul
-    tflops = (total_ops / total_time) / 1e12
+        total_time = end_time - start_time
+        total_ops = iterations * ops_per_matmul
+        tflops = (total_ops / total_time) / 1e12
 
-    print("-" * 40)
-    print(f"Test Results (GPU {device_id}):")
-    print(f"Total Iterations: {iterations}")
-    print(f"Total Time:       {total_time:.2f} seconds")
-    print(f"Performance:      {tflops:.2f} TFLOPS FP32 MatMul")
-    print("-" * 40)
-    print(f"Versions: Python {sys.version} Torch: {torch.__version__}")
+        print("-" * 40)
+        print(f"Test Results (GPU {device_id}):")
+        print(f"Total Iterations: {iterations}")
+        print(f"Total Time:       {total_time:.2f} seconds")
+        print(f"Performance:      {tflops:.2f} TFLOPS FP32 MatMul")
+        print("-" * 40)
+        print(f"Versions: Python {sys.version} CuPy: {cp.__version__}")
 
-    del dummy_memory, matrix_a, matrix_b
-    torch.cuda.empty_cache()
+        del dummy_memory, matrix_a, matrix_b
+        cp.get_default_memory_pool().free_all_blocks()
 
 
 def main():
@@ -85,7 +89,7 @@ def main():
         p.start()
 
     gpu_stress_test(args.device, args.time)
-    if args.with_profiler:
+    if p is not None:
         p.terminate()
 
 
