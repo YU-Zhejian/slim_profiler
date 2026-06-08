@@ -4,6 +4,10 @@
 
 ## News
 
+### `0.1.8` 2026-06-08
+
+- The 1st CPU time issue fixed using Claude; `pytorch` replaced by `cupy` for GPU time measurement.
+
 ### `0.1.7` 2026-03-12
 
 - Set minimal required Python version to 3.10.
