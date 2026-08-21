@@ -19,7 +19,7 @@ try:
 except ImportError:
     pynvml = None
 
-from typing import Mapping, List, Dict, Tuple, Set
+from typing import Mapping, List, Dict, Set
 
 PSUTIL_NOTFOUND_ERRORS = (
     psutil.Error,
@@ -31,32 +31,31 @@ _lh = logging.getLogger("SlimProfiler")
 __all__ = ["SlimProfiler", "GlobalConstants"]
 
 
+@dataclasses.dataclass
+class GpuInfo:
+    """Static information about a single GPU device."""
+
+    name: str
+    mem: int
+    """Total device memory in bytes"""
+
+
 class GlobalConstants:
-    num_gpus: int
-    gpu_names = []
-    gpu_mems = []
+    gpus: List[GpuInfo]
     total_mem: float
-    total_gpu_mem: float
     num_cores: int
     nvidia_driver_version: str
     nvidia_cuda_max_supported: str
 
     def __init__(self):
-        self.gpu_names = []
-        self.gpu_mems = []
+        self.gpus = []
         self.num_cores = psutil.cpu_count(logical=True)
         _lh.info("Num cores: %d", self.num_cores)
         self.total_mem = psutil.virtual_memory().total
         _lh.info("Total memory: %.2f MiB", self.total_mem / (1 << 20))
-        if pynvml is None:
-            self.num_gpus = 0
-            self.total_gpu_mem = 0
-            self.nvidia_driver_version = "N/A"
-            self.nvidia_cuda_max_supported = ""
-        else:
-            self.total_gpu_mem = 0
-            self.nvidia_driver_version = "N/A"
-            self.nvidia_cuda_max_supported = ""
+        self.nvidia_driver_version = "N/A"
+        self.nvidia_cuda_max_supported = ""
+        if pynvml is not None:
             try:
                 pynvml.nvmlInit()
                 self.nvidia_driver_version = pynvml.nvmlSystemGetDriverVersion()
@@ -70,26 +69,42 @@ class GlobalConstants:
                     self.nvidia_cuda_max_supported,
                 )
 
-                self.num_gpus = pynvml.nvmlDeviceGetCount()
-                for i in range(self.num_gpus):
+                for i in range(pynvml.nvmlDeviceGetCount()):
                     handle = pynvml.nvmlDeviceGetHandleByIndex(i)
                     this_gpu_mem = pynvml.nvmlDeviceGetMemoryInfo(handle).total
                     this_gpu_name = pynvml.nvmlDeviceGetName(handle)
-                    self.gpu_names.append(this_gpu_name)
-                    self.gpu_mems.append(this_gpu_mem)
-                    _lh.info("Found GPU %d: %s MEM %.2f MiB", i, pynvml.nvmlDeviceGetName(handle), this_gpu_mem)
-                    self.total_gpu_mem += this_gpu_mem
+                    self.gpus.append(GpuInfo(name=this_gpu_name, mem=this_gpu_mem))
+                    _lh.info("Found GPU %d: %s MEM %.2f MiB", i, this_gpu_name, this_gpu_mem)
 
                 pynvml.nvmlShutdown()
             except pynvml.NVMLError:
-                self.num_gpus = 0
+                self.gpus = []
         _lh.info("Found %d GPUs", self.num_gpus)
         _lh.info("Total GPU memory: %.2f MiB", self.total_gpu_mem / (1 << 20))
+
+    @property
+    def num_gpus(self) -> int:
+        return len(self.gpus)
+
+    @property
+    def total_gpu_mem(self) -> int:
+        return sum(gpu.mem for gpu in self.gpus)
+
+
+@dataclasses.dataclass
+class GpuProcessStats:
+    """Per-process GPU metrics collected for a single device."""
+
+    vmem: Mapping[str, int]
+    """pid_str -> GPU memory used in bytes"""
+
+    utilization: Mapping[str, int]
+    """pid_str -> SM utilization percentage"""
 
 
 def get_gpu_vmem_utilization(
     global_constants: GlobalConstants, pids: Set[int]
-) -> List[Tuple[Mapping[str, int], Mapping[str, int]]]:
+) -> List[GpuProcessStats]:
     if pynvml is None:
         return []
     retl = []
@@ -130,49 +145,51 @@ def get_gpu_vmem_utilization(
                     else:
                         vmem[str(process.pid)] = process.usedGpuMemory
 
-            retl.append((vmem, utilization))
+            retl.append(GpuProcessStats(vmem=vmem, utilization=utilization))
     except pynvml.NVMLError as e:
-        retl = [(defaultdict(lambda: 0), defaultdict(lambda: 0)) for _ in range(global_constants.num_gpus)]
+        retl = [
+            GpuProcessStats(vmem=defaultdict(lambda: 0), utilization=defaultdict(lambda: 0))
+            for _ in range(global_constants.num_gpus)
+        ]
         _lh.error("get_gpu_vmem_utilization ERR: %s", e)
     return retl
 
 
 @dataclasses.dataclass
+class CpuTimeSample:
+    """A snapshot of a process's cumulative CPU time."""
+
+    timestamp_ns: int
+    """Wall-clock time of the sample, in nanoseconds"""
+
+    cpu_time_ns: float
+    """Cumulative (user + system) CPU time, in nanoseconds"""
+
+
+@dataclasses.dataclass
 class ProcessLocalData:
-    rss_json_d: Dict[str, float]
+    rss_json_d: Dict[str, float] = dataclasses.field(default_factory=dict)
     """pid_str -> memory in bytes"""
 
-    cpu_json_d: Dict[str, float]
+    cpu_json_d: Dict[str, float] = dataclasses.field(default_factory=dict)
     """pid_str -> cpu ultilization in seconds"""
 
-    cpid_strs: List[str]
+    cpid_strs: List[str] = dataclasses.field(default_factory=list)
     """Process IDs as strings"""
 
-    gpu_vmem_d: List[Mapping[str, int]]
-    gpu_util_d: List[Mapping[str, int]]
+    gpu_stats: List[GpuProcessStats] = dataclasses.field(default_factory=list)
+    """Per-device GPU metrics, indexed by GPU id"""
 
-    cpu_time_cache: Dict[int, Tuple[int, float]]
-    """ # Process -> [Last time point, Total CPU Time]"""
+    cpu_time_cache: Dict[int, CpuTimeSample] = dataclasses.field(default_factory=dict)
+    """pid -> most recent CPU time sample"""
 
-    max_rss_cache: float
+    max_rss_cache: float = 0
 
-    wallclock_start_ns: int
+    wallclock_start_ns: int = dataclasses.field(default_factory=time.time_ns)
 
-    max_gpu_mem_cache: float
+    max_gpu_mem_cache: float = 0
 
-    max_cpu_util_cache: float
-
-    def __init__(self):
-        self.rss_json_d = {}
-        self.cpu_json_d = {}
-        self.cpid_strs = []
-        self.gpu_vmem_d = []
-        self.gpu_util_d = []
-        self.cpu_time_cache = {}
-        self.max_rss_cache = 0
-        self.wallclock_start_ns = time.time_ns()
-        self.max_gpu_mem_cache = 0
-        self.max_cpu_util_cache = 0.0
+    max_cpu_util_cache: float = 0.0
 
 
 class Serializer:
@@ -189,10 +206,10 @@ class Serializer:
                 {
                     "gpus": [
                         {
-                            "name": self._global_constants.gpu_names[i],
-                            "mem": self._global_constants.gpu_mems[i],
+                            "name": gpu.name,
+                            "mem": gpu.mem,
                         }
-                        for i in range(self._global_constants.num_gpus)
+                        for gpu in self._global_constants.gpus
                     ],
                     "cpus": self._global_constants.num_cores,
                     "mem": self._global_constants.total_mem,
@@ -249,8 +266,8 @@ class Serializer:
                         str(pld.cpu_json_d[current_pid_str]),
                         *itertools.chain(
                             *zip(
-                                [str(pld.gpu_vmem_d[gpu_id][current_pid_str]) for gpu_id in range(self._global_constants.num_gpus)],
-                                [str(pld.gpu_util_d[gpu_id][current_pid_str]) for gpu_id in range(self._global_constants.num_gpus)],
+                                [str(stats.vmem[current_pid_str]) for stats in pld.gpu_stats],
+                                [str(stats.utilization[current_pid_str]) for stats in pld.gpu_stats],
                             ),
                         ),
                     )
@@ -267,8 +284,8 @@ class Serializer:
                     str(joint_cpu),
                     *itertools.chain(
                         *zip(
-                            [str(sum(pld.gpu_vmem_d[gpu_id].values())) for gpu_id in range(self._global_constants.num_gpus)],
-                            [str(sum(pld.gpu_util_d[gpu_id].values())) for gpu_id in range(self._global_constants.num_gpus)],
+                            [str(sum(stats.vmem.values())) for stats in pld.gpu_stats],
+                            [str(sum(stats.utilization.values())) for stats in pld.gpu_stats],
                         ),
                     ),
                 )
@@ -312,7 +329,10 @@ class SlimProfiler(threading.Thread):
         for child in children:
             current_time_ns = time.time_ns()
             current_cpu_times = child.cpu_times()
-            self._pld.cpu_time_cache[child.pid] = (current_time_ns, (current_cpu_times.user + current_cpu_times.system) * 1e9)
+            self._pld.cpu_time_cache[child.pid] = CpuTimeSample(
+                timestamp_ns=current_time_ns,
+                cpu_time_ns=(current_cpu_times.user + current_cpu_times.system) * 1e9,
+            )
 
     def _collect(self):
         try:
@@ -324,15 +344,10 @@ class SlimProfiler(threading.Thread):
         if not self._p.is_running():
             self.terminate()
         _lh.debug("Collecting data for %d processes", len(children))
-        vu = get_gpu_vmem_utilization(
+        self._pld.gpu_stats = get_gpu_vmem_utilization(
             self._global_constants,
             set(c.pid for c in children),
         )
-        self._pld.gpu_vmem_d = []
-        self._pld.gpu_util_d = []
-        for device_gpu_vmem_d, device_gpu_util_d in vu:
-            self._pld.gpu_vmem_d.append(device_gpu_vmem_d)
-            self._pld.gpu_util_d.append(device_gpu_util_d)
         self._pld.cpid_strs = []
         for child in children:
             try:
@@ -341,12 +356,16 @@ class SlimProfiler(threading.Thread):
                 current_cpu_times = child.cpu_times()
                 current_time_ns = time.time_ns()
                 current_cpu_time_ns = (current_cpu_times.user + current_cpu_times.system) * 1e9
-                last_cpu_time_cache = self._pld.cpu_time_cache.get(child.pid, (current_time_ns, 0))
-                self._pld.cpu_time_cache[child.pid] = (current_time_ns, current_cpu_time_ns)
+                last_cpu_time_cache = self._pld.cpu_time_cache.get(
+                    child.pid, CpuTimeSample(timestamp_ns=current_time_ns, cpu_time_ns=0)
+                )
+                self._pld.cpu_time_cache[child.pid] = CpuTimeSample(
+                    timestamp_ns=current_time_ns, cpu_time_ns=current_cpu_time_ns
+                )
                 try:
                     cpu_pct = (
-                        (current_cpu_time_ns - last_cpu_time_cache[1])
-                        / (current_time_ns - last_cpu_time_cache[0])
+                        (current_cpu_time_ns - last_cpu_time_cache.cpu_time_ns)
+                        / (current_time_ns - last_cpu_time_cache.timestamp_ns)
                         * 100
                     )
                     self._pld.cpu_json_d[cpid_str] = cpu_pct
@@ -363,7 +382,7 @@ class SlimProfiler(threading.Thread):
                 break
         self._pld.max_cpu_util_cache = max(self._pld.max_cpu_util_cache, sum(self._pld.cpu_json_d.values()))
         self._pld.max_gpu_mem_cache = max(self._pld.max_gpu_mem_cache, sum(
-            sum(self._pld.gpu_vmem_d[gpu_id].values()) for gpu_id in range(self._global_constants.num_gpus)
+            sum(stats.vmem.values()) for stats in self._pld.gpu_stats
         ))
         self._pld.max_rss_cache = max(self._pld.max_rss_cache, sum(self._pld.rss_json_d.values()))
 
@@ -383,7 +402,7 @@ class SlimProfiler(threading.Thread):
 
     def mean_cpu_util(self):
         return (
-            sum(x[1] for x in self._pld.cpu_time_cache.values())
+            sum(x.cpu_time_ns for x in self._pld.cpu_time_cache.values())
             / (time.time_ns() - self._pld.wallclock_start_ns)
         )
 
@@ -417,7 +436,7 @@ class SlimProfiler(threading.Thread):
             )
         _lh.info(
             "Process group mean CPU Utilization: %.2f%%",
-            sum(x[1] for x in self._pld.cpu_time_cache.values())
+            sum(x.cpu_time_ns for x in self._pld.cpu_time_cache.values())
             / (time.time_ns() - self._pld.wallclock_start_ns)
             * 100,
         )

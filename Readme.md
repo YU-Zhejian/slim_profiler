@@ -4,6 +4,10 @@
 
 ## News
 
+### `0.1.9` 2026-09-21
+
+- Replaced Pandas with Polars.
+
 ### `0.1.8` 2026-06-08
 
 - The 1st CPU time issue fixed using Claude; `pytorch` replaced by `cupy` for GPU time measurement.

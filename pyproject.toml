@@ -36,7 +36,7 @@ dependencies = [
 [project.optional-dependencies]
 plot = [
     "matplotlib",
-    "pandas"
+    "polars"
 ]
 gpu = ["pynvml"]
 gpu_stress = [

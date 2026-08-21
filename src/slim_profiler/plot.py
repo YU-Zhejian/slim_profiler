@@ -10,7 +10,7 @@ from matplotlib.ticker import FuncFormatter
 
 import slim_profiler
 
-import pandas as pd
+import polars as pl
 import matplotlib.pyplot as plt
 
 _lh = logging.getLogger("SlimProfiler::Plot")
@@ -43,22 +43,27 @@ def plot_main(
             gc_data["software"]["slim_profiler"],
             slim_profiler.__version__,
         )
-    df = pd.read_csv(joint_plot_tsv, sep="\t")
-    df["TIME"] = pd.to_datetime(df["TIME"], unit="s")
+    df = pl.read_csv(joint_plot_tsv, separator="\t")
+    # TIME is written as fractional epoch seconds; convert through microseconds to keep sub-second precision.
+    df = df.with_columns(
+        pl.from_epoch((pl.col("TIME") * 1_000_000).round().cast(pl.Int64), time_unit="us").alias("TIME")
+    )
+    time_axis = df["TIME"].to_numpy()
     # Plot memory. Only use MEM_RSS
     plt.figure(figsize=(base_fig_width, base_fig_height))
-    plt.plot(df["TIME"], df["MEM_RSS"], label="RSS")
+    mem_rss = df["MEM_RSS"].to_numpy()
+    plt.plot(time_axis, mem_rss, label="RSS")
     plt.xlabel("Time (UTC)")
     plt.ylabel("Memory")
     plt.title("Memory Usage Over Time")
     plt.gca().yaxis.set_major_formatter(FuncFormatter(format_si))
 
-    mean_rss = df["MEM_RSS"].mean()
+    mean_rss = mem_rss.mean()
     if mean_rss > 0.5 * gc_data["mem"]:
         plt.axhline(gc_data["mem"], color="red", linestyle="--", label="Total Memory")
         plt.ylim(0, gc_data["mem"] * 1.2)
     else:
-        plt.ylim(0, df["MEM_RSS"].max() * 1.2)
+        plt.ylim(0, mem_rss.max() * 1.2)
 
     plt.legend()
     plt.grid()
@@ -68,16 +73,17 @@ def plot_main(
 
     # Now plot CPU.
     plt.figure(figsize=(base_fig_width, base_fig_height))
-    plt.plot(df["TIME"], df["CPU_UTIL_PCT"], label="CPU Usage (%)")
+    cpu_util = df["CPU_UTIL_PCT"].to_numpy()
+    plt.plot(time_axis, cpu_util, label="CPU Usage (%)")
     plt.xlabel("Time (UTC)")
     plt.ylabel("CPU Usage (%)")
     plt.title("CPU Usage Over Time")
-    mean_cpu = df["CPU_UTIL_PCT"].mean()
+    mean_cpu = cpu_util.mean()
     if mean_cpu > 0.5 * gc_data["cpus"] * 100:
         plt.axhline(gc_data["cpus"] * 100, color="red", linestyle="--", label="Total CPU")
         plt.ylim(0, gc_data["cpus"] * 100)
     else:
-        plt.ylim(0, df["CPU_UTIL_PCT"].max() * 1.2)
+        plt.ylim(0, cpu_util.max() * 1.2)
     plt.legend()
     plt.grid()
     plt.tight_layout()
@@ -90,7 +96,7 @@ def plot_main(
     for i in range(num_gpus):
         gpu_mem_col = f"GPU{i}_VMEM"
         gpu_util_col = f"GPU{i}_UTIL_PCT"
-        if df[gpu_mem_col].sum() > 0 or df[gpu_util_col].sum() > 0:
+        if df[gpu_mem_col].to_numpy().sum() > 0 or df[gpu_util_col].to_numpy().sum() > 0:
             gpu_id_in_use.append(i)
     if not gpu_id_in_use:
         _lh.info("No GPU usage detected, skipping GPU plots.")
@@ -102,14 +108,15 @@ def plot_main(
         axs = [axs]
     for i, gpu_id in enumerate(gpu_id_in_use):
         gpu_mem_col = f"GPU{gpu_id}_VMEM"
-        axs[i].plot(df["TIME"], df[gpu_mem_col], label=f"GPU {gpu_id} Memory Used")
-        mean_gpu_mem = df[gpu_mem_col].mean()
+        gpu_mem = df[gpu_mem_col].to_numpy()
+        axs[i].plot(time_axis, gpu_mem, label=f"GPU {gpu_id} Memory Used")
+        mean_gpu_mem = gpu_mem.mean()
         total_gpu_mem = gc_data["gpus"][gpu_id]["mem"]
         if mean_gpu_mem > 0.5 * total_gpu_mem:
             axs[i].axhline(total_gpu_mem, color="red", linestyle="--", label="Total GPU Memory")
             axs[i].set_ylim(0, total_gpu_mem * 1.2)
         else:
-            axs[i].set_ylim(0, df[gpu_mem_col].max() * 1.2)
+            axs[i].set_ylim(0, gpu_mem.max() * 1.2)
         axs[i].set_ylabel("Memory")
         axs[i].yaxis.set_major_formatter(FuncFormatter(format_si))
         axs[i].legend()
@@ -126,13 +133,14 @@ def plot_main(
         axs = [axs]
     for i, gpu_id in enumerate(gpu_id_in_use):
         gpu_util_col = f"GPU{gpu_id}_UTIL_PCT"
-        axs[i].plot(df["TIME"], df[gpu_util_col], label=f"GPU {gpu_id} Utilization (%)")
-        mean_gpu_util = df[gpu_util_col].mean()
+        gpu_util = df[gpu_util_col].to_numpy()
+        axs[i].plot(time_axis, gpu_util, label=f"GPU {gpu_id} Utilization (%)")
+        mean_gpu_util = gpu_util.mean()
         if mean_gpu_util > 0.5 * 100:
             axs[i].axhline(100, color="red", linestyle="--", label="Total GPU Utilization")
             axs[i].set_ylim(0, 120)
         else:
-            axs[i].set_ylim(0, df[gpu_util_col].max() * 1.2)
+            axs[i].set_ylim(0, gpu_util.max() * 1.2)
         axs[i].set_ylabel("GPU Utilization (%)")
         axs[i].legend()
         axs[i].grid()
